@@ -98,3 +98,51 @@ Open http://localhost:5173
 When the backend is running, visit:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+## CI/CD (GitHub Actions → EC2)
+
+Pushing to `main` runs CI checks, then deploys both frontend and backend to EC2 over SSH.
+
+| Workflow | File | When |
+|----------|------|------|
+| CI | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Push / PR to `main` |
+| Deploy | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) | Push to `main` |
+
+Deploy script on the server: [`deploy/deploy.sh`](deploy/deploy.sh)
+
+### GitHub Secrets (Settings → Secrets and variables → Actions)
+
+| Secret | Example |
+|--------|---------|
+| `EC2_HOST` | Elastic IP or `alsreea.in` |
+| `EC2_USER` | `ubuntu` |
+| `EC2_SSH_KEY` | Full private key PEM contents |
+| `EC2_PORT` | `22` (optional; defaults to 22) |
+
+### One-time EC2 prep
+
+1. Repo path: `/home/ubuntu/deploy-test` (git clone of this repository).
+2. Configure non-interactive `git pull` (SSH deploy key or credential helper).
+3. Ensure `ubuntu` can write `/var/www/deploy-frontend`.
+4. Allow passwordless restart of the API service:
+
+```bash
+echo 'ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart school-api' | sudo tee /etc/sudoers.d/school-api
+sudo chmod 440 /etc/sudoers.d/school-api
+```
+
+5. Keep existing `Backend/venv` and `Backend/.env` — the pipeline never overwrites `.env`.
+6. After the first pull that includes `deploy/`:
+
+```bash
+chmod +x /home/ubuntu/deploy-test/deploy/deploy.sh
+```
+
+7. EC2 security group must allow SSH (port 22) from GitHub Actions runners (or your chosen IP range).
+
+### What deploy does
+
+1. `git pull origin main`
+2. Backend: `pip install -r requirements.txt` → `systemctl restart school-api`
+3. Frontend: `npm ci` → `npm run build` (`VITE_API_URL=/api`) → copy `dist/` to `/var/www/deploy-frontend`
+4. Health check: `http://127.0.0.1:8000/api/health`
